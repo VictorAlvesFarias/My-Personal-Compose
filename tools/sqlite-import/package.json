@@ -1,0 +1,9 @@
+{
+  "name": "sqlite-import",
+  "private": true,
+  "type": "module",
+  "description": "One-time copy of the old SQLite databases into PostgreSQL",
+  "dependencies": {
+    "pg": "^8.16.0"
+  }
+}

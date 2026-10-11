@@ -1,0 +1,164 @@
+# Personal applications on one Docker host.
+#
+# Run from this folder: the applications are built from the sibling repositories (../<repository>).
+# Infrastructure is shared: one PostgreSQL, one RabbitMQ and one MinIO serve every application,
+# each application with its own database/user. Settings and secrets come from .env (see .env.example).
+#
+# Docker Engine runs in its own WSL distro (see wsl/), so data lives in plain folders on D:
+# (VOLUMES_ROOT=/mnt/d/volumes is D:\volumes). That distro mounts D: with Linux permissions
+# ("metadata"), which PostgreSQL requires for its data folder.
+
+name: personal
+
+services:
+  # ------------------------------------------------------------------ shared infrastructure
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Read by postgres/init/01-databases.sh, which creates one database and user per application.
+      SAFEGUARD_DB_PASSWORD: ${SAFEGUARD_DB_PASSWORD:?set SAFEGUARD_DB_PASSWORD in .env}
+      GAMEOUT_DB_PASSWORD: ${GAMEOUT_DB_PASSWORD:?set GAMEOUT_DB_PASSWORD in .env}
+    volumes:
+      - ${VOLUMES_ROOT:-/mnt/d/volumes}/postgres:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+    volumes:
+      - ${VOLUMES_ROOT:-/mnt/d/volumes}/rabbitmq:/var/lib/rabbitmq
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # The official minio/minio image is no longer public; pgsty/minio is a maintained community build
+  # of the same server (same binary, command and /data volume).
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - ${VOLUMES_ROOT:-/mnt/d/volumes}/minio:/data
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+
+  # ------------------------------------------------------------------ Safeguard
+
+  safeguard-backend:
+    build:
+      context: ../Safeguard-Backend
+    image: personal/safeguard-backend
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=safeguard;Username=safeguard;Password=${SAFEGUARD_DB_PASSWORD}
+      JwtOptions__SecurityKey: ${SAFEGUARD_JWT_KEY:?set SAFEGUARD_JWT_KEY in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${SAFEGUARD_API_PORT:-8101}:8080"
+
+  safeguard-frontend:
+    build:
+      context: ../Safeguard-Frontend
+    image: personal/safeguard-frontend
+    restart: unless-stopped
+    environment:
+      # Used by the browser, so it is the address published on the host.
+      API_URL: ${SAFEGUARD_API_URL:-http://localhost:8101}
+    depends_on:
+      - safeguard-backend
+    ports:
+      - "${SAFEGUARD_WEB_PORT:-8100}:80"
+
+  # ------------------------------------------------------------------ Gameout
+
+  gameout-backend:
+    build:
+      context: ../Gameout-Backend
+      # Local NuGet feed with Web.Api.Toolkit.*: clone .NET-Web-Api-Toolkit next to the other
+      # repositories and run "dotnet build" there (see README).
+      additional_contexts:
+        web-api-toolkit: ../.NET-Web-Api-Toolkit/bin/Packages
+    image: personal/gameout-backend
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=gameout;Username=gameout;Password=${GAMEOUT_DB_PASSWORD}
+      JwtOptions__SecurityKey: ${GAMEOUT_JWT_KEY:?set GAMEOUT_JWT_KEY in .env}
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__Port: "5672"
+      RabbitMQ__UserName: ${RABBITMQ_USER:-admin}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
+      MinIO__Endpoint: minio:9000
+      # Presigned URLs are used by the browser and by Gameout-Driver on Windows: sign them for the host.
+      MinIO__PublicEndpoint: ${GAMEOUT_MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      MinIO__AccessKey: ${MINIO_ROOT_USER:-minioadmin}
+      MinIO__SecretKey: ${MINIO_ROOT_PASSWORD}
+      Swagger__Enabled: ${GAMEOUT_SWAGGER:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      # Only used when generating presigned URLs (the bucket is created on first use).
+      minio:
+        condition: service_started
+    ports:
+      - "${GAMEOUT_API_PORT:-8201}:8080"
+
+  gameout-frontend:
+    build:
+      context: ../Gameout-Frontend
+    image: personal/gameout-frontend
+    restart: unless-stopped
+    environment:
+      API_URL: ${GAMEOUT_API_URL:-http://localhost:8201}
+      WS_URL: ${GAMEOUT_WS_URL:-ws://localhost:8201/ws}
+    depends_on:
+      - gameout-backend
+    ports:
+      - "${GAMEOUT_WEB_PORT:-8200}:80"
+
+  # ------------------------------------------------------------------ tools
+
+  # One-time copy of the old SQLite databases into PostgreSQL (see README). Not started by "up".
+  sqlite-import:
+    profiles: ["tools"]
+    build:
+      context: ./tools/sqlite-import
+    image: personal/sqlite-import
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ../Safeguard-Backend/App/Db:/import/safeguard:ro
+      - ../Gameout-Backend/Api/Db:/import/gameout:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
