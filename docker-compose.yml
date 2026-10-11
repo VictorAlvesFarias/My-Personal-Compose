@@ -1,7 +1,7 @@
 # Personal applications on one Docker host.
 #
 # Run from this folder: the applications are built from the sibling repositories (../<repository>).
-# Infrastructure is shared: one PostgreSQL, one RabbitMQ and one MinIO serve every application,
+# Infrastructure is shared: one PostgreSQL and one MinIO serve every application,
 # each application with its own database/user. Settings and secrets come from .env (see .env.example).
 #
 # Docker Engine runs in its own WSL distro (see wsl/), so data lives in plain folders on D:
@@ -32,24 +32,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-  rabbitmq:
-    image: rabbitmq:4-management-alpine
-    restart: unless-stopped
-    hostname: rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
-    volumes:
-      - ${VOLUMES_ROOT:-/mnt/d/volumes}/rabbitmq:/var/lib/rabbitmq
-    ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 12
 
   # The official minio/minio image is no longer public; pgsty/minio is a maintained community build
   # of the same server (same binary, command and /data volume).
@@ -124,10 +106,6 @@ services:
     environment:
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=gameout;Username=gameout;Password=${GAMEOUT_DB_PASSWORD}
       JwtOptions__SecurityKey: ${GAMEOUT_JWT_KEY:?set GAMEOUT_JWT_KEY in .env}
-      RabbitMQ__HostName: rabbitmq
-      RabbitMQ__Port: "5672"
-      RabbitMQ__UserName: ${RABBITMQ_USER:-admin}
-      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
       MinIO__Endpoint: minio:9000
       # Presigned URLs are used by the browser and by Gameout-Driver on Windows: sign them for the host.
       MinIO__PublicEndpoint: ${GAMEOUT_MINIO_PUBLIC_ENDPOINT:-localhost:9000}
@@ -136,8 +114,6 @@ services:
       Swagger__Enabled: ${GAMEOUT_SWAGGER:-true}
     depends_on:
       postgres:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
       # Only used when generating presigned URLs (the bucket is created on first use).
       minio:
@@ -152,7 +128,6 @@ services:
     restart: unless-stopped
     environment:
       API_URL: ${GAMEOUT_API_URL:-http://localhost:8201}
-      WS_URL: ${GAMEOUT_WS_URL:-ws://localhost:8201/ws}
     depends_on:
       - gameout-backend
     ports:

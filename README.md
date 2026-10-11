@@ -12,7 +12,7 @@ Repos/
 └── Gameout-Frontend/
 ```
 
-Infrastructure is **shared**: one PostgreSQL, one RabbitMQ and one MinIO serve every application. Each application has its own database and user on the PostgreSQL server (`safeguard`, `gameout`), and can't open the other's.
+Infrastructure is **shared**: one PostgreSQL and one MinIO serve every application. Each application has its own database and user on the PostgreSQL server (`safeguard`, `gameout`), and can't open the other's.
 
 | Service | Host address | |
 |---|---|---|
@@ -21,11 +21,10 @@ Infrastructure is **shared**: one PostgreSQL, one RabbitMQ and one MinIO serve e
 | Gameout (web) | http://localhost:8200 | |
 | Gameout API | http://localhost:8201 | Swagger: `/swagger` |
 | PostgreSQL | localhost:5432 | user `postgres` (admin), `safeguard`, `gameout` |
-| RabbitMQ | localhost:5672, management http://localhost:15672 | |
 | MinIO | http://localhost:9000, console http://localhost:9001 | |
 | Portainer | https://localhost:9443 | user `admin`, password `PORTAINER_ADMIN_PASSWORD` |
 
-Data lives in **`D:\volumes`** (`postgres`, `rabbitmq`, `minio`, `portainer`). Ports, passwords and keys live in `.env`.
+Data lives in **`D:\volumes`** (`postgres`, `minio`, `portainer`). Ports, passwords and keys live in `.env`.
 
 ## How it runs
 
@@ -94,7 +93,7 @@ The backends used to keep their data in `App.db` (SQLite) inside their repositor
 
 To erase everything, stop the stack and delete the folders in `D:\volumes`.
 
-Changing an application's API address only needs the frontend recreated, not rebuilt: the frontends read `/environment.js`, generated at container start from `API_URL` (and `WS_URL` for Gameout).
+Changing an application's API address only needs the frontend recreated, not rebuilt: the frontends read `/environment.js`, generated at container start from `API_URL`.
 
 ## Adding an application
 
@@ -105,14 +104,13 @@ Changing an application's API address only needs the frontend recreated, not reb
    .\compose.ps1 exec postgres psql -U postgres -c "CREATE ROLE myapp LOGIN PASSWORD '...';" -c "CREATE DATABASE myapp OWNER myapp;"
    ```
 
-3. Point it at `postgres`, `rabbitmq` and `minio` by service name.
+3. Point it at `postgres` and `minio` by service name.
 
 ## Notes
 
 - **Portainer** manages this Docker host (containers, images, volumes, logs) through the Docker socket of the `docker` distro. Its certificate is self-signed, so the browser warns once. The admin password from `.env` is only used on the first start; afterwards change it in Portainer. Its HTTP port (9000) is not published, since MinIO uses it.
 - **MinIO image**: the official `minio/minio` image is no longer public. `pgsty/minio` is a maintained community build of the same server (same binary, command and volume).
 - **Presigned URLs**: inside Docker the Gameout API reaches MinIO as `minio:9000`, but download and upload URLs are used by the browser and by Gameout-Driver on Windows, so they are signed for `GAMEOUT_MINIO_PUBLIC_ENDPOINT` (`localhost:9000`).
-- **Gameout-Driver** runs on Windows (tray app), outside Compose. Its defaults already point at this stack (`http://localhost:8201`, RabbitMQ `localhost:5672` as `admin`); in its Configurações, paste an API key from the Gameout site and `RABBITMQ_PASSWORD` from `.env`.
-- **Gameout stops when RabbitMQ is unreachable** (its event worker ends the host). Here it starts after RabbitMQ is healthy and restarts on its own (`restart: unless-stopped`).
+- **Gameout-Driver** runs on Windows (tray app), outside Compose, and only talks to the Gameout API over HTTP (`http://localhost:8201`, its default) with an API key generated on the Gameout site. Uploads go straight to MinIO through presigned URLs.
 - **Local development** (`dotnet run`) also needs PostgreSQL: `appsettings.json` points at `localhost:5432` with user and password `safeguard`/`gameout`. Either start only the database (`.\compose.ps1 up -d postgres`) with those passwords in `.env`, or override `ConnectionStrings__DefaultConnection`.
 - **Performance**: `D:\volumes` and the repositories are Windows folders seen from Linux, which is slower than Docker's own disk. Fine for personal use; builds read the sources over that bridge too.
