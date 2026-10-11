@@ -7,11 +7,10 @@
     .\compose.ps1 logs -f gameout-backend
     .\compose.ps1 --profile tools run --rm sqlite-import safeguard
 #>
-param(
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$ComposeArgs
-)
 
+# No param() block on purpose: in an advanced script PowerShell takes "-d" as -Debug, so
+# "up -d" would run attached. $args passes every argument to docker compose as typed.
+$ComposeArgs = $args
 $Name = 'docker'
 
 # WSL stops a distro a few seconds after its last wsl.exe process ends, even with dockerd running,
