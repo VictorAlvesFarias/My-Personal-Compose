@@ -23,8 +23,9 @@ Infrastructure is **shared**: one PostgreSQL, one RabbitMQ and one MinIO serve e
 | PostgreSQL | localhost:5432 | user `postgres` (admin), `safeguard`, `gameout` |
 | RabbitMQ | localhost:5672, management http://localhost:15672 | |
 | MinIO | http://localhost:9000, console http://localhost:9001 | |
+| Portainer | https://localhost:9443 | user `admin`, password `PORTAINER_ADMIN_PASSWORD` |
 
-Data lives in **`D:\volumes`** (`postgres`, `rabbitmq`, `minio`). Ports, passwords and keys live in `.env`.
+Data lives in **`D:\volumes`** (`postgres`, `rabbitmq`, `minio`, `portainer`). Ports, passwords and keys live in `.env`.
 
 ## How it runs
 
@@ -108,6 +109,7 @@ Changing an application's API address only needs the frontend recreated, not reb
 
 ## Notes
 
+- **Portainer** manages this Docker host (containers, images, volumes, logs) through the Docker socket of the `docker` distro. Its certificate is self-signed, so the browser warns once. The admin password from `.env` is only used on the first start; afterwards change it in Portainer. Its HTTP port (9000) is not published, since MinIO uses it.
 - **MinIO image**: the official `minio/minio` image is no longer public. `pgsty/minio` is a maintained community build of the same server (same binary, command and volume).
 - **Presigned URLs**: inside Docker the Gameout API reaches MinIO as `minio:9000`, but download and upload URLs are used by the browser and by Gameout-Driver on Windows, so they are signed for `GAMEOUT_MINIO_PUBLIC_ENDPOINT` (`localhost:9000`).
 - **Gameout-Driver** runs on Windows (tray app), outside Compose. Its defaults already point at this stack (`http://localhost:8201`, RabbitMQ `localhost:5672` as `admin`); in its Configurações, paste an API key from the Gameout site and `RABBITMQ_PASSWORD` from `.env`.

@@ -66,6 +66,21 @@ services:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
 
+  # Web UI for the containers, images, volumes and logs of this Docker host.
+  # The admin password comes from .env: without an admin within 5 minutes of the first start,
+  # Portainer locks its setup. Only HTTPS (9443) is published: its HTTP port 9000 is MinIO's.
+  portainer:
+    image: portainer/portainer-ce:2.45.2
+    restart: unless-stopped
+    command: --admin-password-file /run/secrets/portainer_admin_password
+    secrets:
+      - portainer_admin_password
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${VOLUMES_ROOT:-/mnt/d/volumes}/portainer:/data
+    ports:
+      - "${PORTAINER_PORT:-9443}:9443"
+
   # ------------------------------------------------------------------ Safeguard
 
   safeguard-backend:
@@ -162,3 +177,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+secrets:
+  portainer_admin_password:
+    environment: PORTAINER_ADMIN_PASSWORD
